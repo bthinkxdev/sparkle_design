@@ -34,13 +34,12 @@
        HERO CAROUSEL (guard: only run if Owl Carousel loaded)
        ============================================================ */
     if ($(".header-carousel").length && typeof $.fn.owlCarousel === 'function') {
-        try {
-            $(".header-carousel").owlCarousel({
+    try {
+        var $heroCarousel = $(".header-carousel").owlCarousel({
             items: 1,
             autoplay: true,
             autoplayTimeout: 5000,
             smartSpeed: 700,
-            center: false,
             dots: true,
             loop: true,
             margin: 0,
@@ -50,9 +49,19 @@
                 '<i class="bi bi-arrow-right"></i>'
             ]
         });
-        } catch (e) { /* ignore */ }
-    }
 
+        // Lazy load next slide image before it appears
+        $heroCarousel.on("changed.owl.carousel", function (e) {
+            var $allItems = $(this).find(".owl-item");
+            var nextIndex = (e.item.index + 1) % e.item.count;
+            var $nextImg  = $allItems.eq(nextIndex).find("img.owl-lazy-custom[data-src]");
+            if ($nextImg.length) {
+                $nextImg.attr("src", $nextImg.data("src")).removeClass("owl-lazy-custom").removeAttr("data-src");
+            }
+        });
+
+    } catch (e) { /* ignore */ }
+}
 
     /* ============================================================
        PRODUCT LIST CAROUSEL

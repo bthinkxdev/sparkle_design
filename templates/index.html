@@ -9,14 +9,19 @@
         {% if banners %}
             {% for banner in banners %}
             <div class="hero-carousel-item">
-                {% if banner.redirect_url %}
-                <a href="{{ banner.redirect_url }}">
-                {% endif %}
-                    <img src="{{ banner.image.url }}" alt="{{ banner.title|default:'Banner' }}"
-                         class="hero-full-img" loading="{% if forloop.first %}eager{% else %}lazy{% endif %}">
-                {% if banner.redirect_url %}
-                </a>
-                {% endif %}
+                {% if banner.redirect_url %}<a href="{{ banner.redirect_url }}">{% endif %}
+                    {% if forloop.first %}
+                        <img src="{{ banner.image.url }}"
+                            alt="{{ banner.title|default:'Banner' }}"
+                            class="hero-full-img"
+                            loading="eager">
+                    {% else %}
+                        <img src="{% static 'img/carousel-1.png' %}"
+                            data-src="{{ banner.image.url }}"
+                            alt="{{ banner.title|default:'Banner' }}"
+                            class="hero-full-img owl-lazy-custom">
+                    {% endif %}
+                {% if banner.redirect_url %}</a>{% endif %}
             </div>
             {% endfor %}
         {% else %}
