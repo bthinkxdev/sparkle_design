@@ -10,6 +10,9 @@ from django.urls import reverse, reverse_lazy
 from django.views.generic import DetailView, FormView, ListView, TemplateView, View
 from django.utils import timezone
 
+from django.views.decorators.csrf import csrf_exempt
+from django.utils.decorators import method_decorator
+
 import json
 import razorpay
 import hmac
@@ -1747,6 +1750,7 @@ class CreateRazorpayOrderView(View):
             if user and not customer_email:
                 customer_email = getattr(user, "email", "") or ""
 
+            base_url = request.build_absolute_uri('/').rstrip('/')
             return JsonResponse({
                 "status": "success",
                 "razorpay_order_id": razorpay_order["id"],
@@ -1757,6 +1761,7 @@ class CreateRazorpayOrderView(View):
                 "customer_email": customer_email,
                 "customer_phone": order.address.phone if order.address else "",
                 "success_url": reverse("store:order_success", kwargs={"order_number": order.order_number}),
+                "callback_url": f"{base_url}/payment/razorpay/callback/?order={order.order_number}",
             })
         except (CartError, StockError) as exc:
             return JsonResponse({"status": "error", "message": str(exc)}, status=400)
@@ -2181,3 +2186,130 @@ class CartDrawerView(View):
                 "subtotal":   "0",
                 "item_count": 0,
             })
+@method_decorator(csrf_exempt, name='dispatch')
+class RazorpayCallbackView(View):
+    """
+    Handles UPI intent return — Razorpay POSTs/GETs here after GPay/PhonePe payment.
+    Works for success, failure, and dismiss.
+    csrf_exempt because Razorpay posts without a CSRF token.
+    """
+
+    def get(self, request, *args, **kwargs):
+        return self.handle(request, request.GET)
+
+    def post(self, request, *args, **kwargs):
+        return self.handle(request, request.POST)
+
+    def handle(self, request, data):
+        fallback_order_number = request.GET.get('order', '')
+
+        try:
+            razorpay_payment_id = data.get('razorpay_payment_id', '')
+            razorpay_order_id   = data.get('razorpay_order_id', '')
+            razorpay_signature  = data.get('razorpay_signature', '')
+
+            # ── No payment ID = dismissed or failed ──
+            if not razorpay_payment_id:
+                error_reason = (
+                    data.get('error[description]')
+                    or data.get('error_description')
+                    or 'Payment cancelled'
+                )
+                logger.warning("UPI callback — no payment id: %s", error_reason)
+
+                if razorpay_order_id:
+                    try:
+                        payment = Payment.objects.select_related('order').get(
+                            razorpay_order_id=razorpay_order_id
+                        )
+                        order_number = payment.order.order_number
+                        # Clean up the pending order (same as RazorpayPaymentCancelView)
+                        payment.order.delete()
+                        if "pending_checkout_data" in request.session:
+                            del request.session["pending_checkout_data"]
+                    except Payment.DoesNotExist:
+                        pass
+
+                if fallback_order_number:
+                    # Order already deleted above; just go to cart
+                    pass
+
+                return redirect('store:cart')
+
+            # ── Signature verification ──
+            signature_data  = f"{razorpay_order_id}|{razorpay_payment_id}"
+            signature_check = hmac.new(
+                settings.RZP_CLIENT_SECRET.encode(),
+                signature_data.encode(),
+                hashlib.sha256
+            ).hexdigest()
+
+            payment = Payment.objects.select_related('order').get(
+                razorpay_order_id=razorpay_order_id
+            )
+
+            if signature_check == razorpay_signature:
+                if payment.status != Payment.Status.PAID:
+                    payment.razorpay_payment_id = razorpay_payment_id
+                    payment.razorpay_signature  = razorpay_signature
+                    payment.status              = Payment.Status.PAID
+                    payment.processed_at        = timezone.now()
+                    payment.save(update_fields=[
+                        'status', 'processed_at',
+                        'razorpay_payment_id', 'razorpay_signature'
+                    ])
+
+                    # Confirm order + deduct stock (mirrors RazorpayPaymentVerifyView)
+                    order = payment.order
+                    old_status = order.status
+                    order.status = Order.Status.CONFIRMED
+                    order.save(update_fields=["status"])
+
+                    for item in order.items.select_related("selected_variant").all():
+                        if item.selected_variant_id:
+                            Variant.objects.filter(pk=item.selected_variant_id).update(
+                                stock_quantity=F("stock_quantity") - item.quantity
+                            )
+
+                    # Clear cart
+                    cart = CartService.get_or_create_cart(request)
+                    if cart.items.exists():
+                        cart.status = Cart.Status.ORDERED
+                        cart.save(update_fields=["status"])
+                        cart.items.all().delete()
+
+                    if "pending_checkout_data" in request.session:
+                        del request.session["pending_checkout_data"]
+
+                    # Send confirmation email
+                    try:
+                        if order.status != old_status:
+                            send_order_confirmation_email_async(order)
+                    except Exception:
+                        pass
+
+                    logger.info("UPI callback success: %s", razorpay_payment_id)
+
+                # Allow OrderSuccessView access for both logged-in and guest
+                request.session['last_order_number'] = payment.order.order_number
+                return redirect(
+                    reverse('store:order_success',
+                            kwargs={'order_number': payment.order.order_number})
+                )
+
+            # ── Signature mismatch ──
+            payment.status = Payment.Status.FAILED
+            payment.save(update_fields=['status'])
+            logger.warning("UPI callback — signature mismatch: %s", razorpay_order_id)
+            # Delete the order (same as verify view on failure)
+            payment.order.delete()
+            if "pending_checkout_data" in request.session:
+                del request.session["pending_checkout_data"]
+            return redirect('store:cart')
+
+        except Payment.DoesNotExist:
+            logger.error("UPI callback — payment not found for order_id: %s", razorpay_order_id)
+            return redirect('store:cart')
+        except Exception as e:
+            logger.error("UPI callback error: %s", e, exc_info=True)
+            return redirect('store:cart')

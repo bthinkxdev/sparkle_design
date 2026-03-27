@@ -31,6 +31,7 @@ urlpatterns = [
     path("orders/<slug:order_number>/", views.OrderSuccessView.as_view(), name="order_success"),
     path("orders/<slug:order_number>/detail/", views.OrderDetailPageView.as_view(), name="order_detail"),
     path("orders/", views.OrderHistoryView.as_view(), name="order_history"),
+    path("payment/razorpay/callback/", views.RazorpayCallbackView.as_view(), name="razorpay_callback"),
     path("payment/razorpay/verify/", views.RazorpayPaymentVerifyView.as_view(), name="razorpay_verify"),
     path("payment/razorpay/cancel/", views.RazorpayPaymentCancelView.as_view(), name="razorpay_cancel"),
     path("about/", views.StaticPageView.as_view(template_name="about.html", extra_context={"active_page": "about"}), name="about"),

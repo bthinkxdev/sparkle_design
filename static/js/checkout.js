@@ -153,7 +153,15 @@ function openRazorpayPopup(data) {
             email: data.customer_email || '',
             contact: data.customer_phone || '',
         },
+        // ── UPI Intent Flow ──
+        // On mobile: Razorpay redirects to GPay/PhonePe, then returns to callback_url
+        // On desktop/card: handler() fires as normal — callback_url is ignored
+        callback_url: data.callback_url || '',
+        redirect: !!(data.callback_url),   // true only when callback_url is set
+
         handler: function(response) {
+            // Fires on desktop / card / netbanking only
+            // UPI intent payments go to callback_url instead
             verifyPayment(response, data.razorpay_order_id, verifyUrl, csrf, data.success_url);
         },
         modal: {
