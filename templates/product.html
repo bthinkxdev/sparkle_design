@@ -756,7 +756,30 @@
             setStockMessage('Out of Stock', 'out');
         }
 
-        if (mainImg && variant.image) {
+        if (variant.image_urls && variant.image_urls.length) {
+            if (mainImg) {
+                mainImg.src = variant.image_urls[0];
+            }
+            var thumbsContainer = document.querySelector('.gallery-thumbs');
+            if (thumbsContainer) {
+                thumbsContainer.innerHTML = variant.image_urls.map(function(url, i) {
+                    return '<div class="gallery-thumb' + (i === 0 ? ' active' : '') + '">' +
+                        '<img src="' + url + '" alt="" loading="lazy" data-full="' + url + '">' +
+                        '</div>';
+                }).join('');
+                // Re-attach click handlers to new thumbs
+                thumbsContainer.querySelectorAll('.gallery-thumb img').forEach(function(thumb) {
+                    thumb.addEventListener('click', function() {
+                        var src = this.getAttribute('data-full') || this.src;
+                        if (mainImg) mainImg.src = src;
+                        thumbsContainer.querySelectorAll('.gallery-thumb').forEach(function(t) {
+                            t.classList.remove('active');
+                        });
+                        thumb.closest('.gallery-thumb').classList.add('active');
+                    });
+                });
+            }
+        } else if (mainImg && variant.image) {
             mainImg.src = variant.image;
         }
     }

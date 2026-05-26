@@ -604,6 +604,11 @@ class ProductDetailView(DetailView):
                         "stock": v.stock_quantity,
                         "attributes": attr_map,
                         "image": primary_image_url,
+                        "image_urls": [ 
+                            img.image.url
+                            for img in imgs
+                            if img.image
+                        ],
                         "is_gst_applicable": bool(product.is_gst_applicable),
                         "gst_percentage": str(product.gst_percentage) if product.is_gst_applicable and product.gst_percentage is not None else None,
                     }
